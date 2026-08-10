@@ -11,3 +11,6 @@ release/
 *.iml
 *.log
 .DS_Store
+
+.codex/
+docs/superpowers/

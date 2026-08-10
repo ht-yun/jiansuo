@@ -182,10 +182,47 @@ public class CompanyBatchService {
     @Transactional
     public void markAutomationIssue(String jobId, Long companyId, String message) {
         CompanyBatchCompanyEntity task = requireCompany(jobId, companyId);
-        task.setStatus(CompanyBatchStatus.CONFLICT);
+        // A timeout, captcha, or changed page structure is not a data conflict.
+        // Keep genuine name/credit-code mismatches as CONFLICT in confirmAllSections.
+        task.setStatus(CompanyBatchStatus.NEEDS_REVIEW);
         task.setCollectionMessage(StringUtils.hasText(message) ? message.trim() : "需要人工处理");
         task.setUpdatedAt(LocalDateTime.now());
         companies.save(task);
+    }
+
+    @Transactional
+    public CompanyBatchCompanyView retryAutomation(String jobId, Long companyId) {
+        CompanyBatchCompanyEntity task = requireCompany(jobId, companyId);
+        if (task.getStatus() == CompanyBatchStatus.RESOLVED) {
+            throw new IllegalArgumentException("已完成的企业无需重新自动采集");
+        }
+        if (task.getStatus() == CompanyBatchStatus.CONFLICT) {
+            throw new IllegalArgumentException("企业身份存在真实冲突，请先人工确认后再采集");
+        }
+        task.setStatus(CompanyBatchStatus.NEEDS_COLLECTION);
+        task.setCollectionMessage(null);
+        task.setUpdatedAt(LocalDateTime.now());
+        companies.save(task);
+        return view(task);
+    }
+
+    /**
+     * Versions before the background-query timeout fix incorrectly used
+     * CONFLICT for technical collection failures. Reclassify only known
+     * automation messages; real identity mismatches stay as conflicts.
+     */
+    @Transactional
+    public int reclassifyLegacyAutomationIssues() {
+        List<CompanyBatchCompanyEntity> legacy = companies.findByStatus(CompanyBatchStatus.CONFLICT)
+                .stream()
+                .filter(task -> isLegacyAutomationIssue(task.getCollectionMessage()))
+                .toList();
+        legacy.forEach(task -> {
+            task.setStatus(CompanyBatchStatus.NEEDS_REVIEW);
+            task.setUpdatedAt(LocalDateTime.now());
+            companies.save(task);
+        });
+        return legacy.size();
     }
 
     @Transactional
@@ -401,6 +438,14 @@ public class CompanyBatchService {
     }
     private boolean isHeader(String value) { return value.equals("单位名称") || value.equals("企业名称") || value.equals("公司名称"); }
     private int count(List<CompanyBatchCompanyEntity> list, CompanyBatchStatus status) { return (int) list.stream().filter(item -> item.getStatus() == status).count(); }
+
+    private boolean isLegacyAutomationIssue(String message) {
+        if (!StringUtils.hasText(message)) return false;
+        return message.contains("查询已提交，但官网未返回可确认的结果")
+                || message.contains("后台自动查询未能继续")
+                || message.contains("官网查询结果长时间未稳定")
+                || message.contains("官网要求验证码");
+    }
     private void apply(CompanyBatchCompanyEntity task, CompanyProfile profile) { task.setOfficialCompanyName(profile.getCompanyName()); task.setCreditCode(profile.getCreditCode()); task.setLegalPerson(profile.getLegalPerson()); task.setRegistrationStatus(profile.getRegistrationStatus()); task.setIndustryName(profile.getIndustryName()); task.setEntityType(profile.getEntityType()); task.setRegisteredAddress(profile.getRegisteredAddress()); task.setRegisteredAddressAreaCode(profile.getRegisteredAddressAreaCode()); task.setSource(profile.getSource()); }
     private CompanyProfile profileFromBasicSection(CompanySectionParser.ParsedSection basic) {
         if (basic == null || basic.records().size() != 1) return null;

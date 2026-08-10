@@ -10,4 +10,5 @@ public class EdgeExtensionCaptureResult {
     private String message;
     private CompanyAllSectionsView parsed;
     private EdgeExtensionTargetView nextTarget;
+    private long cooldownMillis;
 }

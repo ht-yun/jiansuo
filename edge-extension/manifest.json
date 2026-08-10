@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "企业信息自动采集助手",
-  "version": "0.1.5",
-  "description": "在用户完成国家企业信用信息公示系统验证后，将企业公开信息采集到本地项目。",
+  "name": "企业信息验证助手",
+  "version": "0.3.0",
+  "description": "在后台采集国家企业信用信息公示系统公开企业信息，并将候选企业选择交由本地项目页面完成。",
   "permissions": [
     "storage",
     "tabs",
-    "scripting"
+    "scripting",
+    "alarms"
   ],
   "host_permissions": [
     "http://127.0.0.1:8080/*",
@@ -17,7 +18,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "企业信息自动采集助手",
+    "default_title": "企业信息验证助手",
     "default_popup": "popup.html"
   },
   "content_scripts": [

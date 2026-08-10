@@ -4,11 +4,11 @@ spring:
   datasource:
     url: jdbc:h2:file:./data/company_profile;MODE=MySQL;DATABASE_TO_LOWER=TRUE;AUTO_SERVER=TRUE
     driver-class-name: org.h2.Driver
-    username: sa
-    password:
+  username: ""
+  password: ""
   h2:
     console:
-      enabled: false
+  enabled: false
   jpa:
     hibernate:
       ddl-auto: update
@@ -27,11 +27,18 @@ server:
   error:
     include-message: always
 
-company-browser:
-  enabled: true
-  headless: false
-  timeout-millis: 15000
-  max-task-seconds: 1800
-  max-pages-per-section: 50
-  user-data-dir: .browser-data/company-profile
-  screenshot-dir: .screenshots/company-profile
+gsxt-access-control:
+  min-company-interval-seconds: 90
+  max-company-interval-seconds: 180
+  max-companies-per-hour: 10
+  blocked-cooldown-hours: 12
+
+gsxt-captcha:
+  test-mode: false
+  # 超级鹰验证码自动识别。直接在此填写凭据；真实账号密码请勿提交到 git。
+  enabled: false
+  username: ""
+  password: ""
+  soft-id: ""
+  code-type: 2005
+  max-attempts: 3

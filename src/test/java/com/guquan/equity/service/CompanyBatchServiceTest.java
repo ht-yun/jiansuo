@@ -69,6 +69,49 @@ class CompanyBatchServiceTest {
     }
 
     @Test
+    void automationTimeoutIsQueuedForManualReviewRatherThanMarkedAsAConflict() {
+        CompanyBatchCompanyEntity task = company(1L, "查询超时企业",
+                CompanyBatchStatus.NEEDS_COLLECTION);
+        when(companies.findById(1L)).thenReturn(Optional.of(task));
+
+        service.markAutomationIssue("job-1", 1L, "官网查询超时");
+
+        assertThat(task.getStatus()).isEqualTo(CompanyBatchStatus.NEEDS_REVIEW);
+        assertThat(task.getCollectionMessage()).isEqualTo("官网查询超时");
+        verify(companies).save(task);
+    }
+
+    @Test
+    void reclassifiesLegacyCollectionTimeoutWithoutChangingRealConflicts() {
+        CompanyBatchCompanyEntity timeout = company(1L, "超时企业", CompanyBatchStatus.CONFLICT);
+        timeout.setCollectionMessage("查询已提交，但官网未返回可确认的结果。");
+        CompanyBatchCompanyEntity mismatch = company(2L, "真实冲突企业", CompanyBatchStatus.CONFLICT);
+        mismatch.setCollectionMessage("官网企业名称与任务名称不一致");
+        when(companies.findByStatus(CompanyBatchStatus.CONFLICT)).thenReturn(List.of(timeout, mismatch));
+
+        int changed = service.reclassifyLegacyAutomationIssues();
+
+        assertThat(changed).isEqualTo(1);
+        assertThat(timeout.getStatus()).isEqualTo(CompanyBatchStatus.NEEDS_REVIEW);
+        assertThat(mismatch.getStatus()).isEqualTo(CompanyBatchStatus.CONFLICT);
+        verify(companies).save(timeout);
+        verify(companies, never()).save(mismatch);
+    }
+
+    @Test
+    void retryAutomationReturnsManualReviewItemToCollectionQueue() {
+        CompanyBatchCompanyEntity task = company(1L, "待复测企业", CompanyBatchStatus.NEEDS_REVIEW);
+        task.setCollectionMessage("官网查询结果长时间未稳定，待人工补录");
+        when(companies.findById(1L)).thenReturn(Optional.of(task));
+
+        var retried = service.retryAutomation("job-1", 1L);
+
+        assertThat(retried.getStatus()).isEqualTo(CompanyBatchStatus.NEEDS_COLLECTION);
+        assertThat(task.getCollectionMessage()).isNull();
+        verify(companies).save(task);
+    }
+
+    @Test
     void mismatchedCompanyPageIsNotSavedToCache() {
         CompanyBatchCompanyEntity task = company(1L, "北京目标科技有限公司",
                 CompanyBatchStatus.NEEDS_COLLECTION);

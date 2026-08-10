@@ -1,36 +1,13 @@
 const byId = id => document.getElementById(id);
 
 async function load() {
-  const stored = await chrome.storage.local.get(["collectorConfig", "collectorState"]);
-  const config = stored.collectorConfig || {};
-  byId("appUrl").value = config.appUrl || "http://127.0.0.1:8080";
-  byId("pairingCode").value = config.pairingCode || "";
-  byId("jobId").value = config.jobId || "";
+  const stored = await chrome.storage.local.get("collectorState");
   render(stored.collectorState);
-}
-
-function configFromForm() {
-  const pasted = byId("pairingInfo").value.trim();
-  if (pasted) {
-    try {
-      const parsed = JSON.parse(pasted);
-      byId("appUrl").value = parsed.appUrl || byId("appUrl").value;
-      byId("pairingCode").value = parsed.pairingCode || "";
-      byId("jobId").value = parsed.jobId || "";
-    } catch (_) {
-      throw new Error("配对信息格式不正确，请重新从项目页面复制完整内容。");
-    }
-  }
-  return {
-    appUrl: byId("appUrl").value.trim().replace(/\/+$/, ""),
-    pairingCode: byId("pairingCode").value.trim(),
-    jobId: byId("jobId").value.trim()
-  };
 }
 
 function render(state) {
   if (!state) {
-    byId("status").textContent = "尚未连接本地项目。";
+    byId("status").textContent = "等待项目前端发起验证。";
     return;
   }
   const company = state.target?.companyName ? `\n当前企业：${state.target.companyName}` : "";
@@ -41,26 +18,17 @@ function render(state) {
 async function send(type) {
   const buttons = [...document.querySelectorAll("button")];
   buttons.forEach(button => { button.disabled = true; });
-  let config;
   try {
-    config = configFromForm();
-  } catch (error) {
-    render({level: "error", message: error.message});
-    buttons.forEach(button => { button.disabled = false; });
-    return;
-  }
-  if (!config.appUrl || !config.pairingCode || !config.jobId) {
-    render({level: "error", message: "请填写项目地址、配对码和企业任务编号。"});
-    buttons.forEach(button => { button.disabled = false; });
-    return;
-  }
-  try {
-    await chrome.storage.local.set({collectorConfig: config});
+    const stored = await chrome.storage.local.get("collectorConfig");
+    const config = stored.collectorConfig;
+    if (type !== "COLLECTOR_AUTO_CONNECT" && !config) {
+      throw new Error("尚未连接验证任务，请先从项目前端点击“开始官网验证”。");
+    }
     const response = await chrome.runtime.sendMessage({type, config});
     if (response?.error) {
       render({level: "error", message: response.error});
-    } else {
-      render(response?.state);
+    } else if (response?.state) {
+      render(response.state);
     }
   } catch (error) {
     render({level: "error", message: error.message || String(error)});
@@ -69,7 +37,7 @@ async function send(type) {
   }
 }
 
-byId("start").addEventListener("click", () => send("COLLECTOR_START"));
+byId("reconnect").addEventListener("click", () => send("COLLECTOR_AUTO_CONNECT"));
 byId("continue").addEventListener("click", () => send("COLLECTOR_CONTINUE"));
 byId("capture").addEventListener("click", () => send("COLLECTOR_CAPTURE_CURRENT"));
 byId("stop").addEventListener("click", async () => {

@@ -52,11 +52,6 @@
             <optional>true</optional>
         </dependency>
         <dependency>
-            <groupId>com.microsoft.playwright</groupId>
-            <artifactId>playwright</artifactId>
-            <version>1.49.0</version>
-        </dependency>
-        <dependency>
             <groupId>org.apache.poi</groupId>
             <artifactId>poi-ooxml</artifactId>
             <version>${apache-poi.version}</version>
@@ -76,12 +71,6 @@
                 <version>${spring-boot.version}</version>
                 <configuration>
                     <mainClass>com.guquan.equity.CompanyProfileQueryApplication</mainClass>
-                    <requiresUnpack>
-                        <dependency>
-                            <groupId>com.microsoft.playwright</groupId>
-                            <artifactId>driver-bundle</artifactId>
-                        </dependency>
-                    </requiresUnpack>
                 </configuration>
                 <executions>
                     <execution>

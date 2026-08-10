@@ -3,36 +3,30 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>企业信息自动采集助手</title>
+  <title>企业信息验证助手</title>
   <style>
-    *{box-sizing:border-box}body{margin:0;width:390px;padding:16px;color:#172033;background:#f5f7fa;font:14px/1.5 "Microsoft YaHei",sans-serif}
-    h1{margin:0 0 12px;font-size:18px}label{display:block;margin:9px 0 4px;font-weight:600}input,textarea{width:100%;padding:8px;border:1px solid #b8c4d4;border-radius:5px;font:inherit}textarea{min-height:76px;resize:vertical}
-    .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}button{border:0;border-radius:5px;padding:8px 12px;background:#155eef;color:#fff;cursor:pointer;font-weight:600}
-    button.secondary{background:#64748b}.status{margin-top:12px;padding:10px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;white-space:pre-wrap}
-    .hint{color:#667085;font-size:12px;margin:8px 0}.ok{color:#15803d}.warn{color:#b54708}.error{color:#b42318}
+    *{box-sizing:border-box}
+    body{margin:0;width:390px;padding:16px;color:#172033;background:#f5f7fa;font:14px/1.5 "Microsoft YaHei",sans-serif}
+    h1{margin:0 0 12px;font-size:18px}
+    .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+    button{border:0;border-radius:5px;padding:8px 12px;background:#155eef;color:#fff;cursor:pointer;font-weight:600}
+    button.secondary{background:#64748b}
+    button:disabled{opacity:.55;cursor:not-allowed}
+    .status{margin-top:12px;padding:10px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;white-space:pre-wrap}
+    .hint{color:#667085;font-size:12px;margin:8px 0}
+    .ok{color:#15803d}.warn{color:#b54708}.error{color:#b42318}
   </style>
 </head>
 <body>
-  <h1>企业信息自动采集助手</h1>
-  <label for="pairingInfo">项目配对信息</label>
-  <textarea id="pairingInfo" placeholder="在本地项目点击“复制 Edge 扩展配对信息”，然后粘贴到这里"></textarea>
-  <details>
-    <summary>查看/手工填写连接信息</summary>
-  <label for="appUrl">本地项目地址</label>
-  <input id="appUrl" value="http://127.0.0.1:8080">
-  <label for="pairingCode">扩展配对码</label>
-  <input id="pairingCode" placeholder="从项目页面复制">
-  <label for="jobId">企业任务编号</label>
-  <input id="jobId" placeholder="创建企业任务后复制">
-  </details>
-  <p class="hint">扩展会自动填写查询内容，但查询按钮和验证码由用户手动操作；验证通过后的选择、采集和切换由扩展继续。扩展不读取或上传 Cookie、账号和密码。</p>
+  <h1>企业信息验证助手</h1>
+  <p class="hint">请从企业查询项目前端点击“开始官网验证”。助手会自动连接当前任务，不需要复制任务编号或配对码。</p>
   <div class="actions">
-    <button id="start">保存并开始</button>
+    <button id="reconnect">重新连接当前验证</button>
     <button id="continue" class="secondary">我已完成验证，继续</button>
     <button id="capture" class="secondary">采集当前详情页</button>
     <button id="stop" class="secondary">停止采集</button>
   </div>
-  <div id="status" class="status">尚未连接本地项目。</div>
+  <div id="status" class="status">等待项目前端发起验证。</div>
   <script src="popup.js"></script>
 </body>
 </html>

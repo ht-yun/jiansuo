@@ -25,11 +25,16 @@
 
   <section id="taskPanel" class="panel hidden">
     <h2>二、自动采集任务</h2><div id="cards" class="cards"></div>
-    <div class="actions"><button class="success" onclick="copyEdgeExtensionConfig()">复制 Edge 扩展配对信息</button><button class="secondary" onclick="refreshTask()">刷新任务</button><button class="success" onclick="downloadResult()">导出结果表</button><button class="secondary" onclick="toggleOtherInformation()">查看其余信息清单</button><button class="success" onclick="downloadOtherInformation()">导出其余信息清单</button></div>
+    <div class="actions"><button id="startVerificationButton" class="success" onclick="startVerification()">开始后台查询</button><button id="resumeVerificationButton" class="warning hidden" onclick="resumeVerification()">验证完成后继续采集</button><button id="stopVerificationButton" class="danger hidden" onclick="stopVerification()">停止查询</button><button class="secondary" onclick="refreshTask()">刷新任务</button><button class="success" onclick="downloadResult()">导出结果表</button><button class="secondary" onclick="toggleOtherInformation()">查看其余信息清单</button><button class="success" onclick="downloadOtherInformation()">导出其余信息清单</button></div>
     <div id="taskMessage"></div>
 
     <div id="edgeExtensionPanel" class="automation">
-      <div style="flex:1;min-width:260px"><h3>Edge 扩展自动采集（推荐）</h3><div id="edgeExtensionMessage" class="notice">在 Edge 打开 <b>edge://extensions/</b>，启用“开发人员模式”，加载程序目录中的 <b>edge-extension</b> 文件夹。创建任务后复制配对信息，粘贴到扩展即可开始。</div><div class="muted">扩展自动填写查询内容；用户手动点击官网查询并完成验证码，验证后的选择、采集和切换由扩展继续。扩展不会读取或上传 Cookie、账号和密码。</div></div>
+      <div style="flex:1;min-width:260px"><h3>后台查询</h3><div id="edgeExtensionMessage" class="notice">点击“开始后台查询”后，验证助手会在后台标签页处理官网查询；本页面会展示进度和需要选择的企业候选项。</div><div class="muted">系统不会读取或上传 Cookie、账号、密码等登录信息。启用超级鹰后，验证码会优先自动识别；识别失败或未配置时自动转为人工补录。</div><div id="captchaStatus" class="muted"></div></div>
+    </div>
+    <div id="candidateSelectionPanel" class="panel hidden">
+      <h3>选择企业候选项</h3>
+      <p class="muted">官网返回多个候选项。请在此选择正确企业，系统将在后台继续采集。</p>
+      <div id="candidateSelectionRows"></div>
     </div>
 
     <div class="table-wrap"><table><thead><tr><th>原始企业名称</th><th>状态/原因</th><th>工商登记全称</th><th>统一社会信用代码</th><th>法定代表人</th><th>经营状态</th><th>操作</th></tr></thead><tbody id="companyRows"></tbody></table></div>
@@ -47,19 +52,107 @@
 <script>
 const $=id=>document.getElementById(id),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let jobId=localStorage.getItem("companyBatchJobId"),companies=[],selected=null;
+let verificationSessionId=localStorage.getItem("edgeVerificationSessionId"),verificationTimer=null;
 const labels={BASIC:"企业基本信息",SHAREHOLDERS:"股东及出资",INVESTMENTS:"对外投资",POSITIONS:"任职信息",ABNORMAL:"经营异常",SERIOUS_VIOLATIONS:"严重违法失信"};
 const statusLabels={NEEDS_COLLECTION:"待采集",NEEDS_REVIEW:"待审核",CONFLICT:"存在冲突",RESOLVED:"已完成"};
 async function api(url,opt={}){const r=await fetch(url,opt),t=await r.text();let d={};try{d=t?JSON.parse(t):{}}catch(_){d={message:t}}if(!r.ok)throw Error(d.message||d.error||`请求失败 HTTP ${r.status}`);return d}
 function useJob(id){jobId=id;selected=null;if(id)localStorage.setItem("companyBatchJobId",id);else localStorage.removeItem("companyBatchJobId")}
-async function createFromFile(){const file=$("listFile").files[0];if(!file){$("createMessage").textContent="请选择 CSV 或 XLSX 文件";return}try{const fd=new FormData();fd.append("file",file);const d=await api("/api/company-batches",{method:"POST",body:fd});useJob(d.jobId);await showTask();showEdgeInstructions();await loadRecentJobs()}catch(e){$("createMessage").textContent="创建失败："+e.message}}
-async function createManual(){const name=$("manualName").value.trim();if(!name){$("createMessage").textContent="请输入企业名称";return}try{const d=await api("/api/company-batches/manual",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({companyName:name})});useJob(d.jobId);await showTask();showEdgeInstructions();await loadRecentJobs()}catch(e){$("createMessage").textContent="创建失败："+e.message}}
-async function showTask(){$("taskPanel").classList.remove("hidden");await refreshTask();$("taskPanel").scrollIntoView({behavior:"smooth"})}
+async function createFromFile(){const file=$("listFile").files[0];if(!file){$("createMessage").textContent="请选择 CSV 或 XLSX 文件";return}try{const fd=new FormData();fd.append("file",file);const d=await api("/api/company-batches",{method:"POST",body:fd});useJob(d.jobId);await showTask();showVerificationInstructions();await loadRecentJobs()}catch(e){$("createMessage").textContent="创建失败："+e.message}}
+async function createManual(){const name=$("manualName").value.trim();if(!name){$("createMessage").textContent="请输入企业名称";return}try{const d=await api("/api/company-batches/manual",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({companyName:name})});useJob(d.jobId);await showTask();showVerificationInstructions();await loadRecentJobs()}catch(e){$("createMessage").textContent="创建失败："+e.message}}
+async function showTask(){$("taskPanel").classList.remove("hidden");await refreshTask();loadCaptchaStatus();$("taskPanel").scrollIntoView({behavior:"smooth"})}
+async function loadCaptchaStatus(){try{const s=await api("/api/edge-extension/captcha/status");$("captchaStatus").textContent=s.enabled&&s.configured?`已启用超级鹰验证码自动识别（类型 ${esc(s.codeType)}）`:"未启用超级鹰，遇到验证码时等待人工处理"}catch(e){$("captchaStatus").textContent="验证码自动识别状态读取失败"}}
 async function refreshTask(){if(!jobId)return false;try{const [s,list]=await Promise.all([api(`/api/company-batches/${jobId}`),api(`/api/company-batches/${jobId}/companies`)]);companies=list;$("cards").innerHTML=[["企业数",s.totalCompanies],["缓存命中",s.cacheHits],["待采集",s.pendingCollection],["待审核",s.pendingReview],["冲突",s.conflicts],["已完成",s.resolved]].map(x=>`<div class="card"><span>${x[0]}</span><strong>${x[1]}</strong></div>`).join("");$("companyRows").innerHTML=list.map(x=>`<tr><td>${esc(x.inputCompanyName)}</td><td><span class="status">${esc(statusLabels[x.status]||x.status)}</span>${x.collectionMessage?`<br><small>${esc(x.collectionMessage)}</small>`:""}</td><td>${esc(x.profile?.companyName)}</td><td>${esc(x.profile?.creditCode)}</td><td>${esc(x.profile?.legalPerson)}</td><td>${esc(x.profile?.registrationStatus)}</td><td><button onclick="openCompany(${x.companyId})">人工补录</button></td></tr>`).join("");return true}catch(e){$("taskMessage").innerHTML=`<div class="errorbox">刷新失败：${esc(e.message)}</div>`;return false}}
 async function loadRecentJobs(){try{const jobs=await api("/api/company-batches");$("recentJobs").innerHTML=jobs.length?jobs.map(j=>`<option value="${esc(j.jobId)}"${j.jobId===jobId?" selected":""}>${esc(j.originalFilename)}｜${j.totalCompanies} 家｜${esc(new Date(j.createdAt).toLocaleString())}</option>`).join(""):'<option value="">暂无历史任务</option>'}catch(e){$("recentJobs").innerHTML='<option value="">历史任务读取失败</option>'}}
-async function restoreSelectedJob(){const id=$("recentJobs").value;if(!id)return;useJob(id);await showTask();showEdgeInstructions()}
+async function restoreSelectedJob(){const id=$("recentJobs").value;if(!id)return;useJob(id);await showTask();showVerificationInstructions()}
 function openCompany(id){selected=companies.find(x=>x.companyId===id);if(!selected)return;$("allText").value="";$("preview").innerHTML="";document.querySelector("details").open=true;$("allText").scrollIntoView({behavior:"smooth"})}
-function showEdgeInstructions(){$("edgeExtensionMessage").innerHTML=`企业任务已创建，任务编号：<b>${esc(jobId)}</b>。请点击“复制 Edge 扩展配对信息”，粘贴到扩展后开始采集。`}
-async function copyEdgeExtensionConfig(){if(!jobId){$("taskMessage").innerHTML='<div class="warningbox">请先创建或导入企业任务。</div>';return}try{const pairing=await api("/api/edge-extension/pairing");const config={appUrl:location.origin,pairingCode:pairing.pairingCode,jobId};await navigator.clipboard.writeText(JSON.stringify(config));$("edgeExtensionMessage").innerHTML=`配对信息已复制。请打开 Edge 工具栏中的“企业信息自动采集助手”，粘贴后点击“保存并开始”。<br><small>任务编号：${esc(jobId)}</small>`}catch(e){$("taskMessage").innerHTML=`<div class="errorbox">复制扩展配对信息失败：${esc(e.message)}</div>`}}
+function showVerificationInstructions(){$("edgeExtensionMessage").textContent="任务已经准备好。点击“开始官网验证”，在官方网站完成验证后系统会继续处理。"}
+const verificationStatusLabels={
+  CREATED:"正在打开官方网站，等待验证助手连接。",
+  EXTENSION_CONNECTED:"验证助手已连接，请在官网窗口完成验证。",
+  RUNNING:"请在官网窗口完成验证或查询操作。",
+  SEARCHING:"请在官网窗口完成验证或选择正确企业。",
+  WAITING_MANUAL:"请在官网窗口完成验证后稍候。",
+  CAPTCHA_AUTO:"正在通过超级鹰自动识别官网验证码。",
+  WAITING_SELECTION:"请在官网窗口选择正确的企业。",
+  COLLECTING:"验证已通过，正在处理企业信息。",
+  COOLDOWN:"当前企业已处理，系统稍后继续下一家。",
+  NEXT_COMPANY:"正在准备下一家企业。",
+  WAITING_REVIEW:"当前企业需要人工确认，可稍后在任务列表中补录。",
+  BLOCKED:"官网暂时限制访问。系统已进入保护冷却期，请勿刷新或立即重试。",
+  COMPLETED:"任务已经处理完成，可以导出结果表。",
+  ERROR:"验证处理失败，请停止后重试。",
+  STOPPED:"官网验证已停止。"
+};
+function renderVerificationStatus(session){
+  const status=session?.status||"CREATED",message=verificationStatusLabels[status]||"正在等待官网验证。";
+  $("edgeExtensionMessage").innerHTML=`<b>${esc(message)}</b>${session?.currentCompanyName?`<br><small>当前企业：${esc(session.currentCompanyName)}</small>`:""}`;
+  const active=!["BLOCKED","COMPLETED","ERROR","STOPPED"].includes(status);
+  $("startVerificationButton").disabled=active;
+  $("stopVerificationButton").classList.toggle("hidden",!active);
+}
+function clearVerificationPolling(){
+  if(verificationTimer){clearInterval(verificationTimer);verificationTimer=null}
+}
+function closeVerificationWindow(){
+  try{if(verificationWindow&&!verificationWindow.closed)verificationWindow.close()}catch(_){}
+  verificationWindow=null;
+}
+function finishVerification(status){
+  clearVerificationPolling();
+  localStorage.removeItem("edgeVerificationSessionId");
+  verificationSessionId=null;
+  $("startVerificationButton").disabled=false;
+  $("stopVerificationButton").classList.add("hidden");
+  if(status==="COMPLETED"||status==="BLOCKED")closeVerificationWindow();
+}
+async function pollVerification(){
+  if(!verificationSessionId)return;
+  try{
+    const session=await api(`/api/edge-extension/verification-sessions/${verificationSessionId}`);
+    renderVerificationStatus(session);
+    if(["BLOCKED","COMPLETED","ERROR","STOPPED"].includes(session.status)){
+      finishVerification(session.status);
+      await refreshTask();
+    }
+  }catch(e){
+    finishVerification("ERROR");
+    $("edgeExtensionMessage").innerHTML=`<div class="errorbox">验证会话已失效：${esc(e.message)}</div>`;
+  }
+}
+function startVerificationPolling(){
+  clearVerificationPolling();
+  pollVerification();
+  verificationTimer=setInterval(pollVerification,1500);
+}
+async function startVerification(){
+  if(!jobId){$("taskMessage").innerHTML='<div class="warningbox">请先创建或导入企业任务。</div>';return}
+  const popup=window.open("about:blank","gsxtVerification","popup=yes,width=1280,height=860");
+  if(!popup){$("edgeExtensionMessage").innerHTML='<div class="warningbox">浏览器阻止了验证窗口。请允许本页面弹出窗口后重试。</div>';return}
+  verificationWindow=popup;
+  try{
+    popup.document.title="正在打开官网验证";
+    popup.document.body.innerHTML='<div style="font:16px Microsoft YaHei;padding:32px">正在打开国家企业信用信息公示系统，请稍候……</div>';
+    const session=await api("/api/edge-extension/verification-sessions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({jobId})});
+    verificationSessionId=session.sessionId;
+    localStorage.setItem("edgeVerificationSessionId",verificationSessionId);
+    renderVerificationStatus(session);
+    startVerificationPolling();
+    if(session.status==="COMPLETED"){finishVerification("COMPLETED");await refreshTask();return}
+    popup.location.replace(session.officialUrl);
+  }catch(e){
+    finishVerification("ERROR");
+    closeVerificationWindow();
+    $("edgeExtensionMessage").innerHTML=`<div class="errorbox">启动官网验证失败：${esc(e.message)}</div>`;
+  }
+}
+async function stopVerification(){
+  const sessionId=verificationSessionId;
+  clearVerificationPolling();
+  try{if(sessionId)await api(`/api/edge-extension/verification-sessions/${sessionId}`,{method:"DELETE"})}catch(e){$("taskMessage").innerHTML=`<div class="errorbox">停止验证失败：${esc(e.message)}</div>`}
+  finishVerification("STOPPED");
+  closeVerificationWindow();
+  $("edgeExtensionMessage").textContent="官网验证已停止。需要时可重新开始。";
+}
 async function copyCompanyName(){if(selected)await navigator.clipboard.writeText(selected.inputCompanyName)}
 function openOfficialWebsite(){window.open("https://www.gsxt.gov.cn/","_blank","noopener")}
 async function previewAll(){if(!selected){$("preview").innerHTML='<div class="warningbox">请先在列表中选择需要人工补录的企业。</div>';return}try{renderPreview(await api(`/api/company-batches/${jobId}/companies/${selected.companyId}/all-sections/preview`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pageText:$("allText").value})}))}catch(e){$("preview").innerHTML=`<div class="errorbox">解析失败：${esc(e.message)}</div>`}}
@@ -68,5 +161,147 @@ function renderPreview(d){const fields={companyName:"企业名称",creditCode:"�
 async function toggleOtherInformation(){if(!jobId)return;const panel=$("otherInformationPanel");if(!panel.classList.contains("hidden")){panel.classList.add("hidden");return}try{const list=await api(`/api/company-batches/${jobId}/other-information`);$("otherInformationRows").innerHTML=list.length?list.map(item=>`<tr><td>${esc(item.officialCompanyName||item.inputCompanyName)}</td><td>${esc(labels[item.section]||item.section)}</td><td>${item.recordNumber||"-"}</td><td>${esc(item.fieldName)}</td><td>${esc(item.value)}</td></tr>`).join(""):'<tr><td colspan="5" class="muted">暂无其余信息。完成官网解析后，未映射到主结果表的字段会显示在此处。</td></tr>';panel.classList.remove("hidden");panel.scrollIntoView({behavior:"smooth"})}catch(e){$("taskMessage").innerHTML=`<div class="errorbox">读取其余信息清单失败：${esc(e.message)}</div>`}}
 function downloadResult(){if(jobId)location.href=`/api/company-batches/${jobId}/export`}
 function downloadOtherInformation(){if(jobId)location.href=`/api/company-batches/${jobId}/export/other-information`}
-document.addEventListener("DOMContentLoaded",async()=>{await loadRecentJobs();if(jobId){const restored=await refreshTask();if(restored){$("taskPanel").classList.remove("hidden");showEdgeInstructions()}else{useJob(null)}}});
+Object.assign(verificationStatusLabels,{
+  CREATED:"后台任务已创建，正在等待 Edge 验证助手接管。",
+  EXTENSION_CONNECTED:"验证助手已接管，正在后台准备官网查询。",
+  RUNNING:"正在后台处理当前企业。",
+  SEARCHING:"正在后台查询企业信息。",
+  WAITING_SELECTION:"请在下方选择正确的企业候选项。",
+  COLLECTING:"正在读取并解析企业公开信息。",
+  COOLDOWN:"已处理当前企业，正在按安全间隔等待下一家。",
+  NEXT_COMPANY:"正在后台准备下一家企业。",
+  WAITING_REVIEW:"当前企业已转为待人工补录，系统将继续处理后续企业。",
+  BLOCKED:"官网暂时限制访问。系统已停止并进入保护冷却期。",
+  COMPLETED:"后台任务已经处理完成，可以导出结果表。",
+  ERROR:"后台查询发生错误，请停止后稍候重试。",
+  STOPPED:"后台查询已停止。"
+});
+function showVerificationInstructions(){
+  $("startVerificationButton").textContent="开始后台查询";
+  $("stopVerificationButton").textContent="停止查询";
+  $("edgeExtensionMessage").textContent="任务已经准备好。点击“开始后台查询”后，验证助手会在后台处理官网查询；验证码和访问限制会自动转为人工补录。";
+}
+function renderCandidateSelection(session){
+  const panel=$("candidateSelectionPanel"),root=$("candidateSelectionRows");
+  const candidates=Array.isArray(session?.candidates)?session.candidates:[];
+  if(session?.status!=="WAITING_SELECTION"||!candidates.length){
+    panel.classList.add("hidden");root.replaceChildren();return;
+  }
+  root.replaceChildren();
+  candidates.forEach((candidate,index)=>{
+    const box=document.createElement("div");box.className="candidate";
+    const title=document.createElement("b");title.textContent=(index+1)+"．"+(candidate.companyName||"未命名企业");
+    const info=document.createElement("p");
+    const parts=[];
+    if(candidate.creditCode)parts.push("统一社会信用代码："+candidate.creditCode);
+    if(candidate.legalPerson)parts.push("法定代表人："+candidate.legalPerson);
+    if(candidate.registrationStatus)parts.push("状态："+candidate.registrationStatus);
+    if(candidate.registeredAddress)parts.push("地址："+candidate.registeredAddress);
+    info.textContent=parts.join("；")||candidate.summary||"官网未展示更多摘要信息。";
+    const button=document.createElement("button");button.className="success";button.textContent="选择此企业";
+    button.onclick=()=>selectCandidate(candidate.candidateId);
+    box.append(title,info,button);root.append(box);
+  });
+  panel.classList.remove("hidden");panel.scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+function renderVerificationStatus(session){
+  const status=session?.status||"CREATED",message=verificationStatusLabels[status]||"正在等待后台查询。";
+  $("edgeExtensionMessage").innerHTML="<b>"+esc(message)+"</b>"
+    +(session?.message?"<br><small>具体原因："+esc(session.message)+"</small>":"")
+    +(session?.currentCompanyName?"<br><small>当前企业："+esc(session.currentCompanyName)+"</small>":"");
+  const active=!["BLOCKED","COMPLETED","ERROR","STOPPED"].includes(status);
+  $("startVerificationButton").disabled=active;
+  $("resumeVerificationButton").classList.toggle("hidden",status!=="WAITING_MANUAL");
+  $("stopVerificationButton").classList.toggle("hidden",!active);
+  renderCandidateSelection(session);
+}
+function finishVerification(_status){
+  clearVerificationPolling();
+  localStorage.removeItem("edgeVerificationSessionId");
+  verificationSessionId=null;
+  $("startVerificationButton").disabled=false;
+  $("resumeVerificationButton").classList.add("hidden");
+  $("stopVerificationButton").classList.add("hidden");
+  $("candidateSelectionPanel").classList.add("hidden");
+}
+async function startVerification(){
+  if(!jobId){$("taskMessage").innerHTML='<div class="warningbox">请先创建或导入企业任务。</div>';return}
+  try{
+    const session=await api("/api/edge-extension/verification-sessions",{
+      method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({jobId})
+    });
+    verificationSessionId=session.sessionId;
+    localStorage.setItem("edgeVerificationSessionId",verificationSessionId);
+    renderVerificationStatus(session);
+    startVerificationPolling();
+    if(session.status==="COMPLETED"){finishVerification("COMPLETED");await refreshTask()}
+  }catch(e){
+    finishVerification("ERROR");
+    $("edgeExtensionMessage").innerHTML='<div class="errorbox">启动后台查询失败：'+esc(e.message)+"</div>";
+  }
+}
+async function selectCandidate(candidateId){
+  if(!verificationSessionId||!candidateId)return;
+  try{
+    const session=await api("/api/edge-extension/verification-sessions/"
+      +encodeURIComponent(verificationSessionId)+"/selection",{
+        method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({candidateId})
+      });
+    renderVerificationStatus(session);
+  }catch(e){
+    $("edgeExtensionMessage").innerHTML='<div class="errorbox">企业选择提交失败：'+esc(e.message)+"</div>";
+  }
+}
+async function resumeVerification(){
+  if(!verificationSessionId)return;
+  const button=$("resumeVerificationButton");
+  button.disabled=true;
+  try{
+    const session=await api("/api/edge-extension/verification-sessions/"
+      +encodeURIComponent(verificationSessionId)+"/resume",{method:"POST"});
+    renderVerificationStatus(session);
+  }catch(e){
+    $("edgeExtensionMessage").innerHTML='<div class="errorbox">继续后台采集失败：'+esc(e.message)+"</div>";
+  }finally{
+    button.disabled=false;
+  }
+}
+async function stopVerification(){
+  const sessionId=verificationSessionId;
+  clearVerificationPolling();
+  try{if(sessionId)await api("/api/edge-extension/verification-sessions/"+encodeURIComponent(sessionId),{method:"DELETE"})}
+  catch(e){$("taskMessage").innerHTML='<div class="errorbox">停止后台查询失败：'+esc(e.message)+"</div>"}
+  finishVerification("STOPPED");
+  $("edgeExtensionMessage").textContent="后台查询已停止。需要时可重新开始。";
+}
+const refreshTaskBase=refreshTask;
+function renderRetryAutomationActions(){
+  [...$("companyRows").querySelectorAll("tr")].forEach((row,index)=>{
+    const company=companies[index];
+    if(!company||company.status!=="NEEDS_REVIEW")return;
+    const cell=row.lastElementChild;
+    if(cell.querySelector("[data-retry-automation]"))return;
+    const button=document.createElement("button");button.className="secondary";
+    button.dataset.retryAutomation="true";button.textContent="重新自动采集";
+    button.onclick=()=>retryAutomation(company.companyId);
+    cell.append(" ",button);
+  });
+}
+window.refreshTask=async function(){
+  const result=await refreshTaskBase();
+  if(result)renderRetryAutomationActions();
+  return result;
+};
+async function retryAutomation(companyId){
+  if(!jobId)return;
+  try{
+    await api("/api/company-batches/"+encodeURIComponent(jobId)+"/companies/"
+      +encodeURIComponent(companyId)+"/retry-automation",{method:"POST"});
+    $("taskMessage").innerHTML='<div class="notice">该企业已重新加入自动采集队列，请点击“开始后台查询”。</div>';
+    await refreshTask();
+  }catch(e){
+    $("taskMessage").innerHTML='<div class="errorbox">重新自动采集失败：'+esc(e.message)+"</div>";
+  }
+}
+document.addEventListener("DOMContentLoaded",async()=>{await loadRecentJobs();if(jobId){const restored=await refreshTask();if(restored){$("taskPanel").classList.remove("hidden");showVerificationInstructions();loadCaptchaStatus();if(verificationSessionId)startVerificationPolling()}else{useJob(null)}}});
 </script></body></html>

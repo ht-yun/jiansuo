@@ -9,11 +9,7 @@ import com.guquan.equity.model.CompanyAllSectionsView;
 import com.guquan.equity.model.CompanyProfile;
 import com.guquan.equity.model.CompanySectionImportRequest;
 import com.guquan.equity.model.CompanySectionView;
-import com.guquan.equity.model.CompanyBrowserCandidateSelectionRequest;
-import com.guquan.equity.model.CompanyBrowserTask;
-import com.guquan.equity.model.CompanyBrowserTaskRequest;
 import com.guquan.equity.model.CompanyOtherInformationItem;
-import com.guquan.equity.api.CompanyBrowserLookupService;
 import com.guquan.equity.service.CompanyBatchService;
 import java.util.List;
 import org.springframework.core.io.ByteArrayResource;
@@ -35,8 +31,7 @@ import org.springframework.web.multipart.MultipartFile;
 @RequestMapping("/api/company-batches")
 public class CompanyBatchController {
     private final CompanyBatchService service;
-    private final CompanyBrowserLookupService browserService;
-    public CompanyBatchController(CompanyBatchService service, CompanyBrowserLookupService browserService) { this.service = service; this.browserService = browserService; }
+    public CompanyBatchController(CompanyBatchService service) { this.service = service; }
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public CompanyBatchJobView create(@RequestPart("file") MultipartFile file) { return service.create(file); }
     @PostMapping("/manual") public CompanyBatchJobView createManual(@RequestBody CompanyBatchCreateRequest request) { return service.createManual(request == null ? null : request.getCompanyName()); }
@@ -50,15 +45,10 @@ public class CompanyBatchController {
     @PostMapping("/{jobId}/companies/{companyId}/sections/{section}/confirm") public CompanySectionView confirmSection(@PathVariable String jobId, @PathVariable Long companyId, @PathVariable String section, @RequestBody CompanySectionImportRequest request) { return service.confirmSection(jobId, companyId, section, request); }
     @PostMapping("/{jobId}/companies/{companyId}/all-sections/preview") public CompanyAllSectionsView previewAllSections(@PathVariable String jobId, @PathVariable Long companyId, @RequestBody CompanySectionImportRequest request) { return service.previewAllSections(jobId, companyId, request == null ? null : request.getPageText()); }
     @PostMapping("/{jobId}/companies/{companyId}/all-sections/confirm") public CompanyAllSectionsView confirmAllSections(@PathVariable String jobId, @PathVariable Long companyId, @RequestBody CompanySectionImportRequest request) { return service.confirmAllSections(jobId, companyId, request == null ? null : request.getPageText()); }
-    @PostMapping("/{jobId}/browser/start") public CompanyBrowserTask startBrowser(@PathVariable String jobId) { CompanyBrowserTaskRequest request = new CompanyBrowserTaskRequest(); request.setJobId(jobId); return browserService.start(request); }
-    @GetMapping("/{jobId}/browser/tasks/{taskId}") public CompanyBrowserTask browserTask(@PathVariable String jobId, @PathVariable String taskId) { return requireBrowserJob(jobId, browserService.get(taskId)); }
-    @PostMapping("/{jobId}/browser/tasks/{taskId}/continue") public CompanyBrowserTask continueBrowser(@PathVariable String jobId, @PathVariable String taskId) { return requireBrowserJob(jobId, browserService.continueTask(taskId)); }
-    @PostMapping("/{jobId}/browser/tasks/{taskId}/select") public CompanyBrowserTask selectBrowserCandidate(@PathVariable String jobId, @PathVariable String taskId, @RequestBody CompanyBrowserCandidateSelectionRequest request) { return requireBrowserJob(jobId, browserService.selectCandidate(taskId, request == null ? null : request.getCreditCode())); }
-    @DeleteMapping("/{jobId}/browser/tasks/{taskId}") public void stopBrowser(@PathVariable String jobId, @PathVariable String taskId) { requireBrowserJob(jobId, browserService.get(taskId)); browserService.close(taskId); }
     @PostMapping("/{jobId}/companies/{companyId}/skip") public void skipCompany(@PathVariable String jobId, @PathVariable Long companyId) { service.markAutomationIssue(jobId, companyId, "已由用户跳过，等待人工处理"); }
+    @PostMapping("/{jobId}/companies/{companyId}/retry-automation") public CompanyBatchCompanyView retryAutomation(@PathVariable String jobId, @PathVariable Long companyId) { return service.retryAutomation(jobId, companyId); }
     @GetMapping("/{jobId}/export") public ResponseEntity<ByteArrayResource> export(@PathVariable String jobId) { byte[] bytes = service.export(jobId); HttpHeaders headers = new HttpHeaders(); headers.setContentType(MediaType.parseMediaType("text/csv;charset=UTF-8")); headers.setContentDisposition(ContentDisposition.attachment().filename("企业查询结果.csv").build()); return ResponseEntity.ok().headers(headers).body(new ByteArrayResource(bytes)); }
     @GetMapping("/{jobId}/other-information") public List<CompanyOtherInformationItem> otherInformation(@PathVariable String jobId) { return service.otherInformation(jobId); }
     @GetMapping("/{jobId}/export/other-information") public ResponseEntity<ByteArrayResource> exportOtherInformation(@PathVariable String jobId) { byte[] bytes = service.exportOtherInformation(jobId); HttpHeaders headers = new HttpHeaders(); headers.setContentType(MediaType.parseMediaType("text/csv;charset=UTF-8")); headers.setContentDisposition(ContentDisposition.attachment().filename("企业查询其余信息清单.csv").build()); return ResponseEntity.ok().headers(headers).body(new ByteArrayResource(bytes)); }
     @DeleteMapping("/{jobId}") public void delete(@PathVariable String jobId) { service.delete(jobId); }
-    private CompanyBrowserTask requireBrowserJob(String jobId, CompanyBrowserTask task) { if (!jobId.equals(task.getJobId())) throw new IllegalArgumentException("浏览器任务不属于当前批次"); return task; }
 }
